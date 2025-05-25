@@ -8,9 +8,45 @@ import yaml
 
 
 
-st.set_page_config(page_title="Teradata Egress Metadata Extractor", layout="wide")
+# === Page Setup ===
 
-st.title("Teradata Egress Metadata Extractor")
+st.set_page_config(page_title="Automated Metadata Extractor", layout="wide")
+
+st.title("Automated Metadata Extractor")
+
+
+
+# === Login Handling ===
+
+PASSWORD = "icsmde2025"
+
+if "authenticated" not in st.session_state:
+
+    st.session_state.authenticated = False
+
+
+
+if not st.session_state.authenticated:
+
+    with st.form("login_form"):
+
+        password = st.text_input("Enter Password:", type="password")
+
+        login_btn = st.form_submit_button("Login")
+
+        if login_btn:
+
+            if password == PASSWORD:
+
+                st.session_state.authenticated = True
+
+                st.success("Login successful.")
+
+            else:
+
+                st.error("Incorrect password.")
+
+    st.stop()
 
 
 
@@ -38,7 +74,7 @@ def extract_columns(select_block):
 
 
 
-# === Metadata Extractor ===
+# === Main Metadata Parser ===
 
 def traditional_parse(content, file_extension):
 
@@ -50,13 +86,15 @@ def traditional_parse(content, file_extension):
 
         "target_schema": [],
 
-        "schedule": []
+        "schedule": [],
+
+        "execution_condition": {}
 
     }
 
 
 
-    # SQL / BTEQ logic
+    # SQL / BTEQ
 
     if file_extension in ['.sql', '.bteq']:
 
@@ -100,7 +138,7 @@ def traditional_parse(content, file_extension):
 
     # DTSX
 
-    if file_extension == '.dtsx':
+    elif file_extension == '.dtsx':
 
         sources = re.findall(r'<DTS:Connection.*?ObjectName="([^"]+)"', content)
 
@@ -124,9 +162,9 @@ def traditional_parse(content, file_extension):
 
 
 
-    # Python, Java, C#, Shell
+    # Python / Java / C# / Shell
 
-    if file_extension in ['.py', '.java', '.cs', '.sh']:
+    elif file_extension in ['.py', '.java', '.cs', '.sh']:
 
         queries = re.findall(r'SELECT\s+.*?FROM\s+.*?(?:;|\n|$)', content, re.IGNORECASE | re.DOTALL)
 
@@ -178,11 +216,29 @@ def traditional_parse(content, file_extension):
 
 
 
-    # Schedule extraction
+    # Schedule
 
-    schedule_matches = re.findall(r'(Daily|Hourly|cron\(.+?\)|every\s+\d+\s+(minutes|hours|days)|@Scheduled\(cron\s*=\s*"[^"]+"\))', content, re.IGNORECASE)
+    schedule_matches = re.findall(
+
+        r'(Daily|Hourly|cron\(.+?\)|every\s+\d+\s+(minutes|hours|days)|@Scheduled\(cron\s*=\s*"[^"]+"\))',
+
+        content, re.IGNORECASE)
 
     metadata["schedule"] = list(set([" ".join(sched).strip() for sched in schedule_matches if isinstance(sched, tuple)]))
+
+
+
+    # Execution condition based on primary source table
+
+    if metadata["source_schema"]:
+
+        metadata["execution_condition"] = {
+
+            "type": "table_update",
+
+            "table": metadata["source_schema"][0]["table"]
+
+        }
 
 
 
@@ -190,7 +246,7 @@ def traditional_parse(content, file_extension):
 
 
 
-# === Streamlit UI ===
+# === Streamlit Upload UI ===
 
 with st.form("metadata_form"):
 
@@ -199,6 +255,8 @@ with st.form("metadata_form"):
     submit_button = st.form_submit_button("Submit")
 
 
+
+# === On Submit, Parse and Show Metadata ===
 
 if submit_button:
 
@@ -222,6 +280,8 @@ if submit_button:
 
 
 
+        # Export buttons
+
         json_str = json.dumps(metadata, indent=4)
 
         st.download_button("Download JSON", data=json_str, file_name=f"{base_filename}.json", mime="application/json")
@@ -231,8 +291,6 @@ if submit_button:
         yaml_str = yaml.dump(metadata, sort_keys=False)
 
         st.download_button("Download YAML", data=yaml_str, file_name=f"{base_filename}.yaml", mime="text/yaml")
-
-
 
     else:
 
